@@ -2,7 +2,7 @@ FROM registry.fedoraproject.org/fedora:43 AS build
 ARG WHISPER_REF=02612981545f58188a44de99b8a4710793714629
 ARG BUILD_JOBS=4
 RUN dnf -y --nodocs --setopt=install_weak_deps=False install \
-    git cmake ninja-build gcc-c++ vulkan-loader-devel glslc \
+    git cmake ninja-build gcc-c++ vulkan-loader-devel glslc spirv-headers-devel \
     && dnf clean all
 WORKDIR /src
 RUN git init whisper.cpp && cd whisper.cpp \
