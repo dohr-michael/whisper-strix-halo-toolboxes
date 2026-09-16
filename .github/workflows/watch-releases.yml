@@ -1,0 +1,48 @@
+name: Watch whisper.cpp releases
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  packages: write
+concurrency:
+  group: watch-whisper-releases
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.release.outputs.changed }}
+      tag: ${{ steps.release.outputs.tag }}
+      revision: ${{ steps.release.outputs.revision }}
+      marker: ${{ steps.release.outputs.marker }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: ./scripts/check-release.sh
+  build:
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    uses: ./.github/workflows/image.yml
+    with:
+      release_tag: ${{ needs.check.outputs.tag }}
+      release_revision: ${{ needs.check.outputs.revision }}
+  record-success:
+    needs: [check, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Record published upstream source
+        env:
+          RELEASE_TAG: ${{ needs.check.outputs.tag }}
+          RELEASE_REVISION: ${{ needs.check.outputs.revision }}
+        run: printf '%s\n%s\n' "$RELEASE_TAG" "$RELEASE_REVISION" > release.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.check.outputs.marker }}
+          path: release.txt
+          retention-days: 90

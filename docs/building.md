@@ -41,3 +41,29 @@ GHCR package visibility may need to be set to public before anonymous pulls work
 The repository's public visibility alone does not prove package availability.
 For exact deployment reuse, pin the published image digest; package repositories
 and Fedora base tags are not pinned, so rebuilds are not bit-for-bit reproducible.
+
+## Automatic upstream release builds
+
+`watch-releases.yml` checks the latest stable GitHub release of
+`ggml-org/whisper.cpp` hourly, at minute 17. GitHub may delay scheduled runs;
+this is polling, not an instantaneous upstream webhook. Drafts and prereleases
+are excluded. Manual dispatch performs the same check.
+
+On a new release, it resolves the release tag to a commit and builds both backends
+from that exact revision using the same build and smoke-test workflow. Images get:
+
+- `rocm-fedora43-release` and `vulkan-radv-release`: latest successfully published
+  stable Whisper release for each backend.
+- `rocm-fedora43-whisper-v1.9.4` and `vulkan-radv-whisper-v1.9.4`: example version tags.
+
+Set `WHISPER_IMAGE=ghcr.io/dohr-michael/whisper-strix-halo-toolboxes:rocm-fedora43-release`
+in `.env` to select that channel, then pull and recreate the service when ready.
+Publication does not automatically restart running containers. Pinned and nightly
+channels remain separate.
+
+A success marker is saved only after both images have passed startup checks and
+been published. Failed builds are retried by the next poll. The first check builds
+the current release. Markers expire after 90 days, so an unchanged release can be
+rebuilt after expiration or manual marker deletion. If several releases arrive
+between checks, only the latest stable release is selected. Backend publications
+are independent: one can advance while the other fails; the next check retries both.

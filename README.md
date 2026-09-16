@@ -19,7 +19,11 @@ before pulling: a recipe in this table does not imply a completed image release.
 | `rocm-fedora43` | Fedora 43 ROCm, HIP, gfx1151, no VMM | Based on our local Whisper preparation; standalone image validation pending |
 | `vulkan-radv` | Fedora 43 Mesa RADV / Vulkan | Experimental; GPU validation pending |
 | `rocm-fedora43-nightly` | Same ROCm stack, upstream Whisper master | Experimental daily build |
+| `rocm-fedora43-release` / `vulkan-radv-release` | Latest stable Whisper release | Automatically built when a new release is detected |
 | `vulkan-radv-nightly` | Same Vulkan stack, upstream Whisper master | Experimental daily build |
+
+An hourly watcher detects new stable Whisper releases and publishes versioned images
+and `-release` aliases. See [release tracking](docs/building.md#automatic-upstream-release-builds).
 
 The two regular tags pin Whisper to `02612981545f58188a44de99b8a4710793714629`.
 Nightly builds resolve master to a commit at build time and leave regular tags

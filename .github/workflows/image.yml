@@ -12,10 +12,18 @@ on:
         description: Build upstream master under nightly tags
         type: boolean
         default: false
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+      release_revision:
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
-  group: image-${{ github.ref }}-${{ github.event_name }}-${{ inputs.upstream || false }}
+  group: image-${{ github.ref }}-${{ github.event_name }}-${{ inputs.release_tag || inputs.upstream || false }}
   cancel-in-progress: true
 jobs:
   helpers:
@@ -23,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash -n scripts/*.sh refresh-toolboxes.sh
-      - run: python3 tests/test_helpers.py
+      - run: python3 -m unittest discover -s tests -p 'test_*.py'
   image:
     needs: helpers
     strategy:
@@ -43,6 +51,8 @@ jobs:
         env:
           NIGHTLY: ${{ github.event_name == 'schedule' || inputs.upstream == true }}
           BACKEND: ${{ matrix.backend }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_REVISION: ${{ inputs.release_revision }}
         run: |
           set -euo pipefail
           echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
@@ -51,6 +61,11 @@ jobs:
           if [[ "$NIGHTLY" == true ]]; then
             revision=$(git ls-remote https://github.com/ggml-org/whisper.cpp.git refs/heads/master | cut -f1)
             suffix='-nightly'
+          fi
+          if [[ -n "$RELEASE_TAG" ]]; then
+            [[ "$RELEASE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,100}$ ]]
+            revision="$RELEASE_REVISION"
+            suffix='-release'
           fi
           [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
@@ -68,6 +83,7 @@ jobs:
           tags: |
             type=raw,value=${{ steps.image.outputs.channel }},enable={{is_default_branch}}
             type=raw,value=${{ steps.image.outputs.channel }}-upstream-${{ steps.image.outputs.revision }}
+            type=raw,value=${{ matrix.backend }}-whisper-${{ inputs.release_tag }},enable=${{ inputs.release_tag != '' }}
             type=sha,prefix=${{ steps.image.outputs.channel }}-sha-
             type=ref,event=tag,prefix=${{ matrix.backend }}-
       - uses: docker/build-push-action@v6

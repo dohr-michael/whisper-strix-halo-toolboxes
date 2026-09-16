@@ -4,3 +4,5 @@ models/
 *.mp3
 
 benchmark/results/
+
+__pycache__/
