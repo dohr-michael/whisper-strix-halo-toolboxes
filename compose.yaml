@@ -1,0 +1,27 @@
+services:
+  whisper-server:
+    image: ${WHISPER_IMAGE:-ghcr.io/dohr-michael/whisper-strix-halo-toolboxes:rocm-fedora43}
+    restart: unless-stopped
+    devices:
+      - /dev/dri
+      - /dev/kfd
+    security_opt:
+      - label=disable
+    ports:
+      - "127.0.0.1:${WHISPER_PORT:-8081}:8080"
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+    command:
+      - -m
+      - /models/${MODEL_FILE:-ggml-large-v3-turbo.bin}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --inference-path
+      - /v1/audio/transcriptions
+      - --threads
+      - "4"
+      - --convert
+      - --language
+      - auto

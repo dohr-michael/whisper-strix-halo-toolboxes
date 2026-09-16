@@ -1,0 +1,4 @@
+models/
+.env
+*.wav
+*.mp3
