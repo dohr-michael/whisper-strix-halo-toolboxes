@@ -11,6 +11,7 @@ services:
       - "127.0.0.1:${WHISPER_PORT:-8081}:8080"
     volumes:
       - ${MODELS_DIR:-./models}:/models:ro
+    entrypoint: ["whisper-server"]
     command:
       - -m
       - /models/${MODEL_FILE:-ggml-large-v3-turbo.bin}

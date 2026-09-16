@@ -1,98 +1,118 @@
-# Whisper.cpp on AMD Strix Halo
+# AMD Strix Halo Whisper.cpp Toolboxes
 
-Build and run whisper.cpp with ROCm/HIP on Linux AMD Ryzen AI Max (gfx1151).
-Inspired by [kyuz0's AMD Strix Halo toolboxes](https://github.com/kyuz0/amd-strix-halo-toolboxes).
-This independent project packages whisper.cpp; it is not an upstream fork or an official AMD image.
+Container recipes for speech transcription with **whisper.cpp** on AMD Ryzen AI
+Max “Strix Halo” (`gfx1151`), with ROCm/HIP and Vulkan RADV backends.
 
-## What is included
+Inspired by [kyuz0/amd-strix-halo-toolboxes](https://github.com/kyuz0/amd-strix-halo-toolboxes):
+one recipe per backend, shell and server usage, toolbox refresh helpers, automated
+image publication, and documented benchmarks. This is an independent project;
+it is not part of kyuz0's project and is not currently integrated into AI Toolbox Cockpit.
 
-- Fedora 43 ROCm packages, matching the original local setup.
-- whisper-server, whisper-cli, whisper-bench and whisper-quantize.
-- GPU compilation for gfx1151, with GGML_HIP_NO_VMM=ON.
-- A pinned whisper.cpp revision, built inside the container (no host binaries).
-- A GitHub Actions build and GHCR publication workflow, with CLI smoke checks.
+## Available toolboxes
 
-The initial source revision is `02612981545f58188a44de99b8a4710793714629`.
-Fedora packages and base-image tags can change; this is not a bit-for-bit reproducible build.
-Only the ROCm backend is provided initially. These are ordinary OCI containers;
-Toolbx/Distrobox integration and Vulkan variants have not been validated.
+Images are published to **ghcr.io/dohr-michael/whisper-strix-halo-toolboxes** after
+successful CI builds. Check [build status](https://github.com/dohr-michael/whisper-strix-halo-toolboxes/actions)
+before pulling: a recipe in this table does not imply a completed image release.
 
-## Requirements
+| Tag | Backend / stack | Status |
+| --- | --- | --- |
+| `rocm-fedora43` | Fedora 43 ROCm, HIP, gfx1151, no VMM | Based on our local Whisper preparation; standalone image validation pending |
+| `vulkan-radv` | Fedora 43 Mesa RADV / Vulkan | Experimental; GPU validation pending |
+| `rocm-fedora43-nightly` | Same ROCm stack, upstream Whisper master | Experimental daily build |
+| `vulkan-radv-nightly` | Same Vulkan stack, upstream Whisper master | Experimental daily build |
 
-Linux x86-64 with a working AMD GPU driver, `/dev/kfd`, `/dev/dri`, and Podman
-or Docker. The host kernel/firmware must support your GPU. ROCm userspace is
-provided by the image. Rootless Podman users need access to both GPU devices;
-`--group-add keep-groups` preserves supplementary device-group permissions.
+The two regular tags pin Whisper to `02612981545f58188a44de99b8a4710793714629`.
+Nightly builds resolve master to a commit at build time and leave regular tags
+untouched. Fedora image tags and package versions remain mutable.
 
-## Build
+## Quick start: transcribe a file
 
-```sh
-podman build -f Containerfile -t localhost/whisper-strix-halo:dev .
-podman run --rm localhost/whisper-strix-halo:dev --help
-```
-
-Use `--build-arg BUILD_JOBS=2` to reduce build memory usage. For an intentional
-source update, pass `--build-arg WHISPER_REF=<full-commit-sha>` and validate GPU
-inference before changing the default revision. `GGML_NATIVE=OFF` avoids baking
-the builder's CPU instruction set into published binaries.
-
-## Start the server
-
-Place a whisper.cpp GGML model (for example `ggml-large-v3-turbo.bin`) in `models/`.
-Use the [upstream model instructions](https://github.com/ggml-org/whisper.cpp/tree/master/models)
-to obtain it. Models and recordings are not included in this repository or image.
+Requirements: Linux x86-64, a working AMD GPU driver, Podman, `/dev/dri`, and
+`/dev/kfd` for ROCm. Your user must have permission to open the GPU devices.
+See [host setup and troubleshooting](docs/troubleshooting.md).
 
 ```sh
+git clone https://github.com/dohr-michael/whisper-strix-halo-toolboxes.git
+cd whisper-strix-halo-toolboxes
 mkdir -p models
+# Put a whisper.cpp GGML model in models/ and sample.wav in the current directory.
+./scripts/run.sh rocm-fedora43 whisper-cli \
+  -m /models/ggml-large-v3-turbo.bin -f /audio/sample.wav -l auto
+```
+
+Use the [upstream model instructions](https://github.com/ggml-org/whisper.cpp/tree/master/models)
+to obtain a GGML model. Models and recordings are never bundled in the images.
+Replace `rocm-fedora43` with `vulkan-radv` to try RADV. Set `MODELS_DIR` and
+`AUDIO_DIR` to use other directories. `CONTAINER_ENGINE=docker` selects Docker.
+
+For an interactive shell:
+
+```sh
+./scripts/run.sh rocm-fedora43
+# In the container, whisper-cli, whisper-server, whisper-bench and whisper-quantize are on PATH.
+```
+
+## Toolbx and Distrobox
+
+```sh
+./refresh-toolboxes.sh --dry-run all
+./refresh-toolboxes.sh rocm-fedora43
+toolbox enter whisper-rocm-fedora43
+# Host home paths are accessible inside the toolbox.
+whisper-cli -m ~/models/ggml-large-v3-turbo.bin -f ~/sample.wav -l auto
+```
+
+Use `TOOLBOX_ENGINE=distrobox` to select Distrobox (configured with Podman).
+Toolbx/Distrobox host integration is provided by those tools and still needs an
+end-to-end test with these images. The plain Podman path uses explicit devices.
+
+To update, save any container-only files first, then run:
+
+```sh
+./refresh-toolboxes.sh --replace rocm-fedora43
+```
+
+The helper pulls before removing an existing container. It refuses replacement
+without `--replace` and does not prune unrelated images or containers.
+
+## Server mode
+
+```sh
 cp .env.example .env
-# Edit MODELS_DIR and MODEL_FILE in .env as needed.
+# Set MODELS_DIR and MODEL_FILE in .env.
 podman compose up -d
-```
-
-For a local build, set `WHISPER_IMAGE=localhost/whisper-strix-halo:dev` in `.env`.
-Podman Compose requires a Compose provider; `docker compose up -d` is also supported.
-The default host binding is localhost:8081. The server has no authentication;
-use an authenticated reverse proxy if exposing it remotely.
-
-Rootless Podman can instead run directly with host group access:
-
-```sh
-podman run --rm --device /dev/kfd --device /dev/dri \
-  --group-add keep-groups --security-opt label=disable \
-  -p 127.0.0.1:8081:8080 -v "$PWD/models:/models:ro" \
-  localhost/whisper-strix-halo:dev \
-  -m /models/ggml-large-v3-turbo.bin --host 0.0.0.0 --port 8080 \
-  --inference-path /v1/audio/transcriptions --threads 4 --convert --language auto
-```
-
-```sh
 curl http://localhost:8081/v1/audio/transcriptions \
   -F file=@sample.wav -F response_format=json
 ```
 
-This configures the URL used by OpenAI-style transcription clients; it does not
-promise full OpenAI API compatibility. `--convert` invokes Fedora's ffmpeg-free;
-codec availability depends on that package.
+Compose explicitly starts `whisper-server`; images otherwise open a shell.
+See [server configuration](docs/server.md) for direct Podman usage and API limits.
 
-## Validation and publication
+## Building locally
 
-GitHub Actions builds on pull requests and publishes to
-`ghcr.io/dohr-michael/whisper-strix-halo-toolboxes` on main and version tags.
-Tags include `rocm-fedora43`, a commit SHA tag, and release tags when present.
-No registry password is needed: publication uses the repository's GITHUB_TOKEN.
-A newly created GHCR package may need its visibility changed to public in GitHub
-package settings before anonymous pulls work.
+```sh
+./scripts/build.sh rocm-fedora43
+./scripts/build.sh vulkan-radv
+IMAGE_REPOSITORY=localhost/whisper-strix-halo ./scripts/run.sh rocm-fedora43 whisper-cli --help
+```
 
-Hosted CI checks startup without a GPU. It cannot validate gfx1151 inference.
-Before a release, run whisper-cli on real audio with the target GPU, inspect the
-logs for the HIP backend, and check the transcription. No benchmark claims are
-made. The existing local preparation used privileged containers; the examples
-here start with explicit GPU devices and SELinux label disabling, so host-specific
-permissions may still need adjustment.
+See [builds and publication](docs/building.md) for source overrides, nightly
+channels and CI validation. See [benchmarks](benchmark/README.md) for the test
+procedure and what to record. No performance results are claimed yet.
 
-## License and provenance
+## Repository layout
 
-Repository packaging is MIT licensed. whisper.cpp and the bundled system packages
-retain their own licenses; the whisper.cpp license is included in the image.
-The packaging and documentation were prepared with AI assistance and require
-maintainer review. No source modifications are submitted to whisper.cpp.
+- `toolboxes/`: standalone multi-stage recipes for each backend.
+- `scripts/`: local build and run helpers.
+- `refresh-toolboxes.sh`: create or explicitly replace interactive toolboxes.
+- `docs/`: building, server usage and host troubleshooting.
+- `benchmark/`: reproducible GPU validation procedure.
+- `.github/workflows/`: build, smoke-test and publish images.
+
+## License and acknowledgements
+
+Packaging is MIT licensed. Whisper and system packages retain their own licenses;
+the Whisper license is included in each image. Recipes and scripts were authored
+for this repository with AI assistance; no kyuz0 source files were copied.
+Architecture and usage were inspired by kyuz0's project. No source modifications
+are submitted to whisper.cpp.

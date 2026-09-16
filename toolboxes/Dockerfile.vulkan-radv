@@ -2,7 +2,7 @@ FROM registry.fedoraproject.org/fedora:43 AS build
 ARG WHISPER_REF=02612981545f58188a44de99b8a4710793714629
 ARG BUILD_JOBS=4
 RUN dnf -y --nodocs --setopt=install_weak_deps=False install \
-    git cmake ninja-build gcc-c++ rocm-hip-devel hipblas-devel rocblas-devel \
+    git cmake ninja-build gcc-c++ vulkan-loader-devel glslc \
     && dnf clean all
 WORKDIR /src
 RUN git init whisper.cpp && cd whisper.cpp \
@@ -12,16 +12,14 @@ RUN git init whisper.cpp && cd whisper.cpp \
     && git rev-parse HEAD > /src/whisper-revision.txt
 RUN cmake -S whisper.cpp -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_HIP_COMPILER=/usr/lib64/rocm/llvm/bin/clang++ \
-    -DCMAKE_HIP_ARCHITECTURES=gfx1151 \
-    -DGGML_HIP=ON -DGGML_HIP_NO_VMM=ON -DGGML_NATIVE=OFF \
+    -DGGML_VULKAN=ON -DGGML_NATIVE=OFF \
     -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=ON \
     && cmake --build build --parallel "${BUILD_JOBS}" \
         --target whisper-server whisper-cli whisper-bench whisper-quantize
 
 FROM registry.fedoraproject.org/fedora:43
 RUN dnf -y --nodocs --setopt=install_weak_deps=False install \
-    rocm-hip rocblas hipblas ffmpeg-free libgomp ca-certificates \
+    vulkan-loader mesa-vulkan-drivers vulkan-tools ffmpeg-free libgomp ca-certificates sudo shadow-utils util-linux passwd findutils procps-ng \
     && dnf clean all && rm -rf /var/cache/dnf/*
 COPY --from=build /src/build/bin/ /opt/whisper/bin/
 COPY --from=build /src/whisper.cpp/LICENSE /usr/share/licenses/whisper.cpp/LICENSE
@@ -30,5 +28,5 @@ ENV PATH="/opt/whisper/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/opt/whisper/bin"
 WORKDIR /opt/whisper
 EXPOSE 8080
-ENTRYPOINT ["whisper-server"]
-CMD ["--help"]
+LABEL com.github.containers.toolbox="true"
+CMD ["/bin/bash"]

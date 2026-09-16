@@ -2,3 +2,5 @@ models/
 .env
 *.wav
 *.mp3
+
+benchmark/results/

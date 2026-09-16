@@ -1,17 +1,35 @@
-name: Build and publish ROCm image
+name: Build and publish toolboxes
 on:
   push:
     branches: [main]
     tags: ['v*']
   pull_request:
+  schedule:
+    - cron: '37 3 * * *'
   workflow_dispatch:
+    inputs:
+      upstream:
+        description: Build upstream master under nightly tags
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
-  group: image-${{ github.ref }}
+  group: image-${{ github.ref }}-${{ github.event_name }}-${{ inputs.upstream || false }}
   cancel-in-progress: true
 jobs:
+  helpers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash -n scripts/*.sh refresh-toolboxes.sh
+      - run: python3 tests/test_helpers.py
   image:
+    needs: helpers
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [rocm-fedora43, vulkan-radv]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
@@ -20,10 +38,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Image name
+      - name: Resolve image and upstream revision
         id: image
-        shell: bash
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+        env:
+          NIGHTLY: ${{ github.event_name == 'schedule' || inputs.upstream == true }}
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          set -euo pipefail
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          revision=$(sed -n 's/^ARG WHISPER_REF=//p' "toolboxes/Dockerfile.$BACKEND")
+          suffix=''
+          if [[ "$NIGHTLY" == true ]]; then
+            revision=$(git ls-remote https://github.com/ggml-org/whisper.cpp.git refs/heads/master | cut -f1)
+            suffix='-nightly'
+          fi
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "channel=$BACKEND$suffix" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
         if: github.event_name != 'pull_request'
         with:
@@ -35,30 +66,37 @@ jobs:
         with:
           images: ${{ steps.image.outputs.name }}
           tags: |
-            type=raw,value=rocm-fedora43,enable={{is_default_branch}}
-            type=sha
-            type=ref,event=tag
+            type=raw,value=${{ steps.image.outputs.channel }},enable={{is_default_branch}}
+            type=raw,value=${{ steps.image.outputs.channel }}-upstream-${{ steps.image.outputs.revision }}
+            type=sha,prefix=${{ steps.image.outputs.channel }}-sha-
+            type=ref,event=tag,prefix=${{ matrix.backend }}-
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: Containerfile
+          file: toolboxes/Dockerfile.${{ matrix.backend }}
           load: true
           tags: whisper-smoke:ci
-          build-args: BUILD_JOBS=2
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_JOBS=2
+            WHISPER_REF=${{ steps.image.outputs.revision }}
+          cache-from: type=gha,scope=${{ matrix.backend }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.backend }}
       - name: Verify runtime without GPU
         run: |
-          docker run --rm whisper-smoke:ci --help
-          docker run --rm --entrypoint whisper-cli whisper-smoke:ci --help
+          docker run --rm whisper-smoke:ci whisper-server --help
+          docker run --rm whisper-smoke:ci whisper-cli --help
       - name: Publish verified image
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Containerfile
+          file: toolboxes/Dockerfile.${{ matrix.backend }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: BUILD_JOBS=2
-          cache-from: type=gha
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            org.whisper.cpp.revision=${{ steps.image.outputs.revision }}
+          build-args: |
+            BUILD_JOBS=2
+            WHISPER_REF=${{ steps.image.outputs.revision }}
+          cache-from: type=gha,scope=${{ matrix.backend }}
